@@ -1,7 +1,7 @@
-import { CATEGORIES } from '../../config';
-import type { ToneColor } from '../../config';
-import { formatINR } from '../../domain/money';
-import type { Transaction, TransactionKind } from '../../domain/types';
+import { CATEGORIES } from '../../constants';
+import type { ToneColor } from '../../constants';
+import { formatINR } from '../../utils/money';
+import type { Transaction, TransactionKind } from '../../types';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 

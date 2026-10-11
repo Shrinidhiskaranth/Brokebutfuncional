@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Chip, Switch } from './Controls';
-import { nextTrapIndex } from './focus';
+import { nextTrapIndex } from '../../utils/focus';
 import { Modal } from './Modal';
 
 describe('Switch', () => {

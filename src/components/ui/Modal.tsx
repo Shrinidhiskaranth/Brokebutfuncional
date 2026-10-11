@@ -7,7 +7,7 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { getFocusable, nextTrapIndex } from './focus';
+import { getFocusable, nextTrapIndex } from '../../utils/focus';
 
 interface ModalProps {
   labelledBy: string;

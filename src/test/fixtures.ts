@@ -1,6 +1,6 @@
 import { createExampleMonth, createFreshMonth } from '../domain/months';
-import type { MonthState } from '../domain/types';
-import { createSequentialIds } from '../state/ids';
+import type { MonthState } from '../types';
+import { createSequentialIds } from '../utils/ids';
 
 export const example = (): MonthState => createExampleMonth(createSequentialIds('e'));
 export const fresh = (): MonthState => createFreshMonth(createSequentialIds('f'));

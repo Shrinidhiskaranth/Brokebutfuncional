@@ -1,5 +1,5 @@
-import type { CategoryKey, Decision, MonthState } from '../domain/types';
-import { cleanDecision } from '../state/reducer';
+import type { CategoryKey, Decision, MonthState } from '../../types';
+import { cleanDecision } from '../../state/reducer';
 
 export interface AffordDraft {
   name: string;

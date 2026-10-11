@@ -1,16 +1,18 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ConfirmDialog } from '../components/dialogs/ConfirmDialog';
 import { Chip, Switch } from '../components/ui/Controls';
 import { Icon } from '../components/ui/Icon';
 import { TransactionList } from '../components/ui/TransactionList';
-import { useToast } from '../components/ui/toastContext';
-import { LIMITS, MONTH_DAYS } from '../config';
-import { clamp, formatINR } from '../domain/money';
-import { parseAmount, parseDay, sanitizeText } from '../domain/sanitize';
-import type { Bill, BillType } from '../domain/types';
-import { useFinance } from '../state/financeContext';
+import { useToast } from '../hooks/useToast';
+import { LIMITS, MONTH_DAYS } from '../constants';
+import { clamp, formatINR } from '../utils/money';
+import { parseAmount, parseDay, sanitizeText } from '../utils/sanitize';
+import type { Bill, BillType } from '../types';
+import { useFinance } from '../hooks/useFinance';
+import { MAX_GOALS } from '../state/reducer';
 import { PageHeading } from './PageHeading';
+
+const ConfirmDialog = lazy(() => import('../components/dialogs/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
 
 type BillErrors = Partial<Record<'name' | 'amount' | 'due', string>>;
 
@@ -135,12 +137,97 @@ function AddBillForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+function AddGoalForm({ onDone }: { onDone: () => void }) {
+  const { dispatch, undo } = useFinance();
+  const toast = useToast();
+  const uid = useId();
+  const nameRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState('');
+  const [target, setTarget] = useState('');
+  const [errors, setErrors] = useState<Partial<Record<'name' | 'target', string>>>({});
+
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const clean = { name: sanitizeText(name), target: parseAmount(target) };
+    const next: Partial<Record<'name' | 'target', string>> = {};
+    if (!clean.name) next.name = 'Give the goal a name.';
+    if (!clean.target) next.target = 'Enter a target above ₹0.';
+    setErrors(next);
+    if (next.name || next.target) {
+      document.getElementById(`${uid}-${next.name ? 'name' : 'target'}`)?.focus();
+      return;
+    }
+    dispatch({ type: 'ADD_GOAL', payload: clean });
+    toast(`Goal “${clean.name}” created.`, { onUndo: undo });
+    onDone();
+  };
+
+  return (
+    <form className="add-bill" aria-label="New savings goal" noValidate onSubmit={onSubmit}>
+      <div className="two">
+        <div className="field">
+          <label htmlFor={`${uid}-name`}>Goal name</label>
+          <input
+            ref={nameRef}
+            id={`${uid}-name`}
+            className="input"
+            maxLength={LIMITS.maxTextLength}
+            autoComplete="off"
+            placeholder="e.g. Goa trip"
+            value={name}
+            aria-invalid={errors.name ? true : undefined}
+            aria-describedby={errors.name ? `${uid}-name-err` : undefined}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {errors.name && (
+            <p className="error" id={`${uid}-name-err`}>
+              {errors.name}
+            </p>
+          )}
+        </div>
+        <div className="field">
+          <label htmlFor={`${uid}-target`}>Target (₹)</label>
+          <input
+            id={`${uid}-target`}
+            className="input"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={9}
+            value={target}
+            aria-invalid={errors.target ? true : undefined}
+            aria-describedby={errors.target ? `${uid}-target-err` : undefined}
+            onChange={(e) => setTarget(e.target.value)}
+          />
+          {errors.target && (
+            <p className="error" id={`${uid}-target-err`}>
+              {errors.target}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="two">
+        <button type="button" className="btn" onClick={onDone}>
+          Cancel
+        </button>
+        <button type="submit" className="btn orange">
+          Create goal
+        </button>
+      </div>
+    </form>
+  );
+}
+
 type ResetKind = 'fresh' | 'example';
 
 export function MoneyPage({ focusOnMount }: { focusOnMount: boolean }) {
   const { state, snapshot, dispatch, undo } = useFinance();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
+  const [addingGoal, setAddingGoal] = useState(false);
   const [reset, setReset] = useState<ResetKind | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -217,7 +304,10 @@ export function MoneyPage({ focusOnMount }: { focusOnMount: boolean }) {
             </h2>
             <span className="pill">{formatINR(snapshot.saved)} saved</span>
           </div>
-          <p className="small">Money you save here comes out of what you can spend.</p>
+          <p className="small">
+            Money you save here comes out of your remaining balance. Your monthly forecast would cover{' '}
+            <strong>{Math.round(snapshot.goalsFunded * 100)}%</strong> of all goals by Day 30.
+          </p>
           <ul className="goals">
             {state.goals.map((g) => {
               const have = snapshot.savedByGoal[g.id] ?? 0;
@@ -225,7 +315,9 @@ export function MoneyPage({ focusOnMount }: { focusOnMount: boolean }) {
               return (
                 <li className="goal" key={g.id}>
                   <div className="goal-h">
-                    <p className="goal-name">{g.name}</p>
+                    <p className="goal-name">
+                      <Icon name="target" /> {g.name}
+                    </p>
                     <p className="num small">
                       {formatINR(have)} / {formatINR(g.target)}
                     </p>
@@ -258,13 +350,34 @@ export function MoneyPage({ focusOnMount }: { focusOnMount: boolean }) {
                       ))}
                     </div>
                   )}
+                  {!g.emergency && (
+                    <button
+                      type="button"
+                      className="link small goal-remove"
+                      onClick={() => {
+                        dispatch({ type: 'DELETE_GOAL', payload: { id: g.id } });
+                        toast(`Removed “${g.name}”. ${formatINR(have)} went back to your balance.`, { onUndo: undo });
+                      }}
+                    >
+                      Remove goal
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ul>
+          {addingGoal ? (
+            <AddGoalForm onDone={() => setAddingGoal(false)} />
+          ) : (
+            state.goals.length < MAX_GOALS && (
+              <button type="button" className="btn sm add-btn" onClick={() => setAddingGoal(true)}>
+                <Icon name="plus" /> New goal
+              </button>
+            )
+          )}
         </section>
 
-        <section className="card s12" aria-labelledby="history-h">
+        <section className="card s12 below-fold" aria-labelledby="history-h">
           <div className="card-h">
             <h2 id="history-h" className="card-title">
               History
@@ -292,21 +405,23 @@ export function MoneyPage({ focusOnMount }: { focusOnMount: boolean }) {
       </div>
 
       {reset && (
-        <ConfirmDialog
-          title={reset === 'fresh' ? 'Start your own month?' : 'Reload the example month?'}
-          message={
-            reset === 'fresh'
-              ? 'This clears the example and starts Day 1 with ₹10,000. You can undo right after.'
-              : 'This replaces your current month with the example student month.'
-          }
-          confirmLabel={reset === 'fresh' ? 'Start fresh' : 'Reload example'}
-          onClose={() => setReset(null)}
-          onConfirm={() => {
-            dispatch({ type: reset === 'fresh' ? 'START_FRESH' : 'LOAD_EXAMPLE' });
-            toast(reset === 'fresh' ? 'Fresh start: ₹10,000 for 30 days.' : 'Example month loaded.', { onUndo: undo });
-            setReset(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <ConfirmDialog
+            title={reset === 'fresh' ? 'Start your own month?' : 'Reload the example month?'}
+            message={
+              reset === 'fresh'
+                ? 'This clears the example and starts Day 1 with ₹10,000. You can undo right after.'
+                : 'This replaces your current month with the example student month.'
+            }
+            confirmLabel={reset === 'fresh' ? 'Start fresh' : 'Reload example'}
+            onClose={() => setReset(null)}
+            onConfirm={() => {
+              dispatch({ type: reset === 'fresh' ? 'START_FRESH' : 'LOAD_EXAMPLE' });
+              toast(reset === 'fresh' ? 'Fresh start: ₹10,000 for 30 days.' : 'Example month loaded.', { onUndo: undo });
+              setReset(null);
+            }}
+          />
+        </Suspense>
       )}
     </>
   );

@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import { Chip } from '../components/ui/Controls';
-import { useToast } from '../components/ui/toastContext';
-import { LIMITS, QUICK_PURCHASES } from '../config';
-import { applyDecision, buildSavingMoves, computeSnapshot, judgeDecision } from '../domain/finance';
-import { formatINR } from '../domain/money';
-import type { Decision, MonthState, Snapshot } from '../domain/types';
-import { useFinance } from '../state/financeContext';
-import { draftToDecision, emptyDraft } from './affordDraft';
-import type { AffordDraft } from './affordDraft';
+import { useToast } from '../hooks/useToast';
+import { LIMITS, QUICK_PURCHASES } from '../constants';
+import { ForecastChart } from '../components/charts/ForecastChart';
+import { applyDecision, buildForecast, buildSavingMoves, computeSnapshot, judgeDecision, riskRank } from '../domain/finance';
+import { formatINR } from '../utils/money';
+import type { Decision, MonthState, Snapshot } from '../types';
+import { useFinance } from '../hooks/useFinance';
+import { draftToDecision, emptyDraft } from '../features/afford/affordDraft';
+import type { AffordDraft } from '../features/afford/affordDraft';
 import { PageHeading } from './PageHeading';
 
 const ACTION_LABEL: Record<Decision['kind'], string> = {
@@ -18,38 +19,43 @@ const ACTION_LABEL: Record<Decision['kind'], string> = {
 };
 const TONE_BG = { good: 'mint', warn: 'yellow', bad: 'pink' } as const;
 
+type Change = 'better' | 'worse' | 'same';
+
 interface CompareRowProps {
   label: string;
-  before: number;
-  after: number;
-  format?: (value: number) => string;
-  higherIsBetter?: boolean;
+  before: string;
+  after: string;
+  change: Change;
 }
 
-function CompareRow({ label, before, after, format = formatINR, higherIsBetter = true }: CompareRowProps) {
-  const same = Math.abs(after - before) < 1;
-  const better = higherIsBetter ? after > before : after < before;
+function CompareRow({ label, before, after, change }: CompareRowProps) {
   return (
     <div className="cmp-row">
       <dt>{label}</dt>
       <dd className="num">
-        {same ? (
-          format(after)
+        {change === 'same' ? (
+          after
         ) : (
           <>
             <span className="was">
               <span className="sr-only">from </span>
-              {format(before)}
+              {before}
             </span>{' '}
-            <span className={better ? 'up' : 'down'}>
+            <span className={change === 'better' ? 'up' : 'down'}>
               <span className="sr-only">to </span>
-              {format(after)}
+              {after}
             </span>
           </>
         )}
       </dd>
     </div>
   );
+}
+
+/** Compare two numbers where a higher value is better (or lower, when `higherIsBetter` is false). */
+function compareNumbers(before: number, after: number, higherIsBetter = true): Change {
+  if (Math.abs(after - before) < 0.5) return 'same';
+  return after > before === higherIsBetter ? 'better' : 'worse';
 }
 
 interface AffordResultProps {
@@ -60,14 +66,17 @@ interface AffordResultProps {
   onConfirm: (decision: Decision, after: Snapshot) => void;
 }
 
+/**
+ * The simulation result: a verdict plus before → after for the six things the
+ * brief names: remaining balance, daily allowance, savings goals, monthly
+ * forecast, financial risk and financial health.
+ */
 export function AffordResult({ state, snap, draft, onClear, onConfirm }: AffordResultProps) {
   const decision = draftToDecision(state, draft);
-  const after = useMemo(
-    () => (decision ? computeSnapshot(applyDecision(state, decision, () => 'preview')) : null),
-    [decision, state],
-  );
+  const simulated = useMemo(() => (decision ? applyDecision(state, decision, () => 'preview') : null), [decision, state]);
+  const after = useMemo(() => (simulated ? computeSnapshot(simulated) : null), [simulated]);
 
-  if (!decision || !after) {
+  if (!decision || !after || !simulated) {
     const typedBadAmount = !draft.decision && draft.amount.trim() !== '';
     return (
       <div className="answer idle">
@@ -80,18 +89,24 @@ export function AffordResult({ state, snap, draft, onClear, onConfirm }: AffordR
   }
 
   const verdict = judgeDecision(snap, after, decision, state);
-  const brokeFmt = (d: number) => (d > 30 ? 'Never' : `Day ${d}`);
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const riskChange: Change =
+    riskRank(after.risk.level) === riskRank(snap.risk.level) ? 'same' : riskRank(after.risk.level) < riskRank(snap.risk.level) ? 'better' : 'worse';
+
   return (
     <div className={`answer tone-${TONE_BG[verdict.tone]}`}>
       <p className="label">{decision.kind === 'buy' ? `Can I afford ${decision.name}?` : decision.name}</p>
       <p className="word">{verdict.title}</p>
       <p className="verdict-msg">{verdict.message}</p>
       <dl className="compare">
-        <CompareRow label="You can spend per day" before={snap.perDay} after={after.perDay} />
-        <CompareRow label="Left at month end" before={snap.monthEnd} after={after.monthEnd} />
-        <CompareRow label="You go broke on" before={snap.brokeOnDay ?? 31} after={after.brokeOnDay ?? 31} format={brokeFmt} />
-        <CompareRow label="Money health" before={snap.score} after={after.score} format={(v) => `${Math.round(v)}/100`} />
+        <CompareRow label="Remaining balance" before={formatINR(snap.free)} after={formatINR(after.free)} change={compareNumbers(snap.free, after.free)} />
+        <CompareRow label="Daily allowance" before={formatINR(snap.perDay)} after={formatINR(after.perDay)} change={compareNumbers(snap.perDay, after.perDay)} />
+        <CompareRow label="Savings goals funded" before={pct(snap.goalsFunded)} after={pct(after.goalsFunded)} change={compareNumbers(snap.goalsFunded * 100, after.goalsFunded * 100)} />
+        <CompareRow label="Monthly forecast" before={formatINR(snap.monthEnd)} after={formatINR(after.monthEnd)} change={compareNumbers(snap.monthEnd, after.monthEnd)} />
+        <CompareRow label="Financial risk" before={snap.risk.level} after={after.risk.level} change={riskChange} />
+        <CompareRow label="Financial health" before={`${snap.score}/100`} after={`${after.score}/100`} change={compareNumbers(snap.score, after.score)} />
       </dl>
+      <ForecastChart series={buildForecast(state, snap)} compare={buildForecast(simulated, after)} today={state.day} label="Monthly forecast" />
       <div className="two">
         <button type="button" className="btn" onClick={onClear}>
           {decision.kind === 'buy' ? 'Skip it' : 'Not now'}

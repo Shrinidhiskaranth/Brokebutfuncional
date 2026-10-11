@@ -1,8 +1,8 @@
 /** Factories for month states: the example month, a blank month, and the roll-over. */
-import { MONTHLY_BUDGET, SCHEMA_VERSION } from '../config';
+import { MONTHLY_BUDGET, SCHEMA_VERSION } from '../constants';
 import { payDueBills } from './finance';
-import { sum } from './money';
-import type { Bill, BillType, CategoryKey, Goal, IdFactory, MonthState, Transaction, TransactionKind } from './types';
+import { sum } from '../utils/money';
+import type { Bill, BillType, CategoryKey, Goal, IdFactory, MonthState, Transaction, TransactionKind } from '../types';
 
 /** A realistic student month paused on Day 12, so the app opens with real data. */
 export function createExampleMonth(newId: IdFactory): MonthState {

@@ -1,5 +1,5 @@
 /** App-wide constants: the rules of the challenge live here. */
-import type { CategoryKey } from './domain/types';
+import type { CategoryKey } from '../types';
 
 export const MONTH_DAYS = 30;
 export const MONTHLY_BUDGET = 10_000;

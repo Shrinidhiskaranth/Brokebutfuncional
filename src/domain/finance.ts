@@ -7,9 +7,9 @@
  *   usualDaily  = everyday spending so far ÷ days passed − habit savings
  *   monthEnd    = free − usualDaily × remaining days
  */
-import { MONTH_DAYS } from '../config';
-import { clamp, formatINR, sum } from './money';
-import type { Bill, CategoryKey, Decision, HealthFactor, IdFactory, MonthState, Snapshot, Tone } from './types';
+import { MONTH_DAYS } from '../constants';
+import { clamp, formatINR, sum } from '../utils/money';
+import type { Bill, CategoryKey, Decision, ForecastPoint, HealthFactor, IdFactory, MonthState, RiskLevel, Snapshot, Tone } from '../types';
 
 const isActive = (bill: Bill): boolean => bill.active;
 
@@ -79,6 +79,10 @@ export function computeSnapshot(state: MonthState): Snapshot {
   const emergencySaved = emergencyGoal ? (savedByGoal[emergencyGoal.id] ?? 0) : 0;
 
   const health = scoreHealth({ monthEnd, usualDaily, perDay, saved, budget, subscriptionsMonthly, emergencySaved });
+  const risk = assessRisk({ free, monthEnd, brokeOnDay, usualDaily, perDay });
+  const goalTarget = sum(state.goals, (g) => g.target);
+  const goalSaved = sum(state.goals, (g) => Math.min(g.target, savedByGoal[g.id] ?? 0));
+  const goalsFunded = goalTarget > 0 ? clamp((goalSaved + Math.max(0, monthEnd)) / goalTarget, 0, 1) : 1;
 
   return {
     day,
@@ -103,8 +107,71 @@ export function computeSnapshot(state: MonthState): Snapshot {
     plannedDaily,
     byCategory,
     byDay,
+    risk,
+    goalTarget,
+    goalSaved,
+    goalsFunded,
     ...health,
   };
+}
+
+interface RiskInput {
+  free: number;
+  monthEnd: number;
+  brokeOnDay: number | null;
+  usualDaily: number;
+  perDay: number;
+}
+
+const RISK_TONE: Record<RiskLevel, Tone> = { Low: 'good', Medium: 'warn', High: 'bad' };
+
+/** Financial risk: High if you will run out, Medium if the margin is thin or you overspend. */
+export function assessRisk({ free, monthEnd, brokeOnDay, usualDaily, perDay }: RiskInput): Snapshot['risk'] {
+  let level: RiskLevel = 'Low';
+  let reason = 'You are on track to finish the month with money left.';
+  if (free < 0 || brokeOnDay !== null || monthEnd < 0) {
+    level = 'High';
+    reason = brokeOnDay !== null ? `At this pace your money runs out on Day ${brokeOnDay}.` : 'You are forecast to overspend this month.';
+  } else if (monthEnd < 500 || usualDaily > perDay) {
+    level = 'Medium';
+    reason = 'Your safety margin for the month is thin.';
+  }
+  return { level, tone: RISK_TONE[level], reason };
+}
+
+/** Numeric rank for comparing risk levels (lower is safer). */
+export const riskRank = (level: RiskLevel): number => ({ Low: 1, Medium: 2, High: 3 })[level];
+
+/**
+ * Balance at the end of each day: real history up to today, then a projection
+ * at the usual daily spend with upcoming bills taken on their due days.
+ * The final point always equals the snapshot's month-end forecast.
+ */
+export function buildForecast(state: MonthState, snap: Snapshot): ForecastPoint[] {
+  const points: ForecastPoint[] = [];
+  let balance = state.budget;
+  for (let d = 1; d <= state.day; d += 1) {
+    for (const tx of state.transactions) {
+      if (tx.day === d) balance += tx.kind === 'income' ? tx.amount : -tx.amount;
+    }
+    points.push({ day: d, balance, projected: false });
+  }
+  let projected = balance - Math.max(0, snap.usualDaily - snap.spentToday);
+  // Bills already overdue but unpaid are taken immediately.
+  projected -= sum(
+    snap.upcomingBills.filter((b) => b.due <= state.day),
+    (b) => b.amount,
+  );
+  const last = points[points.length - 1];
+  if (last) last.balance = projected;
+  for (let d = state.day + 1; d <= MONTH_DAYS; d += 1) {
+    projected -= snap.usualDaily + sum(
+      snap.upcomingBills.filter((b) => b.due === d),
+      (b) => b.amount,
+    );
+    points.push({ day: d, balance: projected, projected: true });
+  }
+  return points;
 }
 
 interface HealthInput {

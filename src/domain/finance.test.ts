@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { example, ids, must, simpleMonth } from '../test/fixtures';
 import {
   applyDecision,
+  assessRisk,
   buildCalendar,
+  buildForecast,
   buildQuickWins,
   buildSavingMoves,
   computeSnapshot,
   judgeDecision,
   payDueBills,
+  riskRank,
   scoreHealth,
   statusLine,
 } from './finance';
-import { formatINR } from './money';
-import type { Decision, MonthState } from './types';
+import { formatINR } from '../utils/money';
+import type { Decision, MonthState } from '../types';
 
 const withTx = (extra: MonthState['transactions']): MonthState =>
   simpleMonth({ transactions: [...simpleMonth().transactions, ...extra] });
@@ -196,5 +199,37 @@ describe('UI helpers', () => {
     expect(formatINR(123456)).toBe('₹1,23,456');
     expect(formatINR(-40.4)).toBe('−₹40');
     expect(formatINR(Number.NaN)).toBe('₹0');
+  });
+});
+
+describe('financial risk, goals and forecast', () => {
+  it('rates risk High when money runs out, Medium when the margin is thin, Low otherwise', () => {
+    expect(assessRisk({ free: 2000, monthEnd: -100, brokeOnDay: 26, usualDaily: 200, perDay: 140 }).level).toBe('High');
+    expect(assessRisk({ free: 2000, monthEnd: 300, brokeOnDay: null, usualDaily: 100, perDay: 140 }).level).toBe('Medium');
+    expect(assessRisk({ free: 2000, monthEnd: 900, brokeOnDay: null, usualDaily: 100, perDay: 140 }).level).toBe('Low');
+    expect(riskRank('Low')).toBeLessThan(riskRank('High'));
+  });
+
+  it('includes risk and goal funding in the snapshot', () => {
+    const s = computeSnapshot(example());
+    expect(s.risk.level).toBe('High');
+    expect(s.goalTarget).toBe(3000);
+    expect(s.goalSaved).toBe(800);
+    expect(s.goalsFunded).toBeCloseTo(800 / 3000);
+  });
+
+  it('counts the month-end surplus towards goals', () => {
+    const s = computeSnapshot(simpleMonth());
+    expect(s.goalsFunded).toBe(1);
+  });
+
+  it('builds a 30-day forecast that ends at the month-end forecast', () => {
+    const m = example();
+    const s = computeSnapshot(m);
+    const points = buildForecast(m, s);
+    expect(points).toHaveLength(30);
+    expect(points[0]?.projected).toBe(false);
+    expect(points[29]?.projected).toBe(true);
+    expect(points[29]?.balance ?? 0).toBeCloseTo(s.monthEnd);
   });
 });

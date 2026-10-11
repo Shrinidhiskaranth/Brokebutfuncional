@@ -1,4 +1,4 @@
-import type { IconName } from '../ui/Icon';
+import type { IconName } from '../components/ui/Icon';
 
 export type TabId = 'home' | 'afford' | 'money';
 

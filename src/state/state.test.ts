@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { STORAGE_KEY } from '../config';
+import { STORAGE_KEY } from '../constants';
 import { computeSnapshot } from '../domain/finance';
-import type { MonthState } from '../domain/types';
+import type { MonthState } from '../types';
 import { example, fresh, ids, must, simpleMonth } from '../test/fixtures';
-import { cleanDecision, historyReducer, reducer } from './reducer';
+import { MAX_GOALS, cleanDecision, historyReducer, reducer } from './reducer';
 import type { Action } from './reducer';
-import { loadState, saveState, validateState } from './storage';
+import { loadState, saveState, validateState } from '../services/storage';
 
 const run = (state: MonthState, action: Action) => reducer(state, action, ids());
 const lastTx = (state: MonthState) => must(state.transactions.at(-1), 'last transaction');
@@ -97,6 +97,36 @@ describe('reducer', () => {
     expect(cleanDecision(simpleMonth(), null)).toBeNull();
     expect(cleanDecision(simpleMonth(), { kind: 'hack' })).toBeNull();
     expect(cleanDecision(simpleMonth(), { kind: 'buy', name: 'X', amount: 5, category: '__proto__' })).toMatchObject({ category: 'shopping' });
+  });
+});
+
+describe('income and goals', () => {
+  it('records money in with a sanitised note', () => {
+    const next = run(simpleMonth(), { type: 'LOG_INCOME', payload: { amount: '1,500', note: ' <i>Gig</i> ' } });
+    expect(lastTx(next)).toMatchObject({ kind: 'income', amount: 1500, note: 'iGig/i' });
+    const m = simpleMonth();
+    expect(run(m, { type: 'LOG_INCOME', payload: { amount: '-1' } })).toBe(m);
+  });
+
+  it('creates goals with validation and a sensible limit', () => {
+    const m = simpleMonth();
+    expect(run(m, { type: 'ADD_GOAL', payload: { name: '', target: 100 } })).toBe(m);
+    expect(run(m, { type: 'ADD_GOAL', payload: { name: 'Trip', target: 'lots' } })).toBe(m);
+    const next = run(m, { type: 'ADD_GOAL', payload: { name: 'Trip', target: '3000' } });
+    expect(next.goals.at(-1)).toMatchObject({ name: 'Trip', target: 3000 });
+    let full = m;
+    for (let i = 0; i < MAX_GOALS + 2; i += 1) full = run(full, { type: 'ADD_GOAL', payload: { name: `G${i}`, target: 100 } });
+    expect(full.goals).toHaveLength(MAX_GOALS);
+  });
+
+  it('removes a goal and returns its savings, but keeps the emergency fund', () => {
+    const withGoal = run(simpleMonth(), { type: 'ADD_GOAL', payload: { name: 'Trip', target: 3000 } });
+    const goalId = must(withGoal.goals.at(-1)).id;
+    const saved = run(withGoal, { type: 'SAVE_TO_GOAL', payload: { goalId, amount: 200 } });
+    const removed = run(saved, { type: 'DELETE_GOAL', payload: { id: goalId } });
+    expect(removed.goals.some((g) => g.id === goalId)).toBe(false);
+    expect(computeSnapshot(removed).balance).toBe(computeSnapshot(withGoal).balance);
+    expect(run(removed, { type: 'DELETE_GOAL', payload: { id: 'g1' } })).toBe(removed);
   });
 });
 

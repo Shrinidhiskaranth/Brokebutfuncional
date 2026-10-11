@@ -3,8 +3,8 @@
  * these functions before it reaches application state. React escapes all
  * rendered text as well, so stored text can never become markup.
  */
-import { LIMITS, MONTH_DAYS, isCategoryKey } from '../config';
-import type { CategoryKey } from './types';
+import { LIMITS, MONTH_DAYS, isCategoryKey } from '../constants';
+import type { CategoryKey } from '../types';
 
 // Control, zero-width and bidi-override characters can spoof or break displayed text.
 // eslint-disable-next-line no-control-regex -- matching control characters is the purpose of this pattern

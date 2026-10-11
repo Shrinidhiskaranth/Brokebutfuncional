@@ -1,4 +1,4 @@
-import type { IdFactory } from '../domain/types';
+import type { IdFactory } from '../types';
 
 let counter = 0;
 

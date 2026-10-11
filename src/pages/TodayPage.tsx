@@ -1,20 +1,32 @@
-import { CategoryBreakdown, HealthCard, Hero, MoneySplit, MonthCalendar, QuickWins, Welcome } from '../components/dashboard/Dashboard';
+import {
+  CategoryBreakdown,
+  ForecastCard,
+  HealthCard,
+  Hero,
+  MoneySplit,
+  MonthCalendar,
+  MonthMetrics,
+  QuickWins,
+  Welcome,
+} from '../components/dashboard/Dashboard';
 import { TransactionList } from '../components/ui/TransactionList';
-import { useToast } from '../components/ui/toastContext';
 import type { QuickWin } from '../domain/finance';
-import { useFinance } from '../state/financeContext';
+import { useFinance } from '../hooks/useFinance';
+import { useToast } from '../hooks/useToast';
 import { PageHeading } from './PageHeading';
 
 interface TodayPageProps {
   focusOnMount: boolean;
   onSpend: () => void;
+  onIncome: () => void;
   onSurprise: () => void;
   onAfford: () => void;
   onSeeAll: () => void;
   onTryWin: (win: QuickWin) => void;
 }
 
-export function TodayPage({ focusOnMount, onSpend, onSurprise, onAfford, onSeeAll, onTryWin }: TodayPageProps) {
+/** Dashboard: daily allowance, the brief's key metrics, forecast, health and recent activity. */
+export function TodayPage({ focusOnMount, onSpend, onIncome, onSurprise, onAfford, onSeeAll, onTryWin }: TodayPageProps) {
   const { state, snapshot, dispatch, undo } = useFinance();
   const toast = useToast();
   const recent = state.transactions
@@ -28,13 +40,15 @@ export function TodayPage({ focusOnMount, onSpend, onSurprise, onAfford, onSeeAl
       <PageHeading focusOnMount={focusOnMount}>Hey, here&apos;s your money today</PageHeading>
       {state.welcome && <Welcome onDismiss={() => dispatch({ type: 'DISMISS_WELCOME' })} />}
       <div className="grid">
-        <Hero snap={snapshot} onSpend={onSpend} onSurprise={onSurprise} onAfford={onAfford} />
+        <Hero snap={snapshot} onSpend={onSpend} onIncome={onIncome} onSurprise={onSurprise} onAfford={onAfford} />
         <HealthCard snap={snapshot} />
+        <MonthMetrics snap={snapshot} />
+        <ForecastCard state={state} snap={snapshot} />
         <MoneySplit snap={snapshot} />
         <QuickWins state={state} snap={snapshot} onTry={onTryWin} />
         <MonthCalendar state={state} snap={snapshot} />
         <CategoryBreakdown snap={snapshot} />
-        <section className="card s12" aria-labelledby="recent-h">
+        <section className="card s12 below-fold" aria-labelledby="recent-h">
           <div className="card-h">
             <h2 id="recent-h" className="card-title">
               Recent

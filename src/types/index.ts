@@ -79,6 +79,16 @@ export interface HealthFactor {
   value: number;
 }
 
+export type RiskLevel = 'Low' | 'Medium' | 'High';
+
+export interface ForecastPoint {
+  day: number;
+  /** Money left (balance) at the end of this day */
+  balance: number;
+  /** true for days after today (projected), false for real history */
+  projected: boolean;
+}
+
 export interface Snapshot {
   day: number;
   daysLeft: number;
@@ -105,6 +115,12 @@ export interface Snapshot {
   plannedDaily: number;
   byCategory: Partial<Record<CategoryKey, number>>;
   byDay: Record<number, number>;
+  /** Financial risk, derived from the forecast and spending pace */
+  risk: { level: RiskLevel; tone: Tone; reason: string };
+  goalTarget: number;
+  goalSaved: number;
+  /** Share of all goal targets covered by savings plus the forecast month-end surplus (0–1) */
+  goalsFunded: number;
   score: number;
   mood: { label: string; tone: Tone };
   factors: HealthFactor[];

@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useReducer } from 'react';
 import type { ReactNode } from 'react';
 import { computeSnapshot } from '../domain/finance';
 import { createExampleMonth } from '../domain/months';
-import type { IdFactory, MonthState } from '../domain/types';
+import type { IdFactory, MonthState } from '../types';
 import { FinanceContext } from './financeContext';
 import type { FinanceContextValue } from './financeContext';
-import { newId as defaultNewId } from './ids';
-import { historyReducer } from './reducer';
-import type { Action, HistoryAction, HistoryState } from './reducer';
-import { loadState, saveState } from './storage';
+import { newId as defaultNewId } from '../utils/ids';
+import { historyReducer } from '../state/reducer';
+import type { Action, HistoryAction, HistoryState } from '../state/reducer';
+import { loadState, saveState } from '../services/storage';
 
 interface FinanceProviderProps {
   children: ReactNode;

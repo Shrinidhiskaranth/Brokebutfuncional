@@ -2,11 +2,11 @@
  * Every state change goes through this pure reducer. Each payload is
  * re-validated here (defence in depth), so invalid input leaves state unchanged.
  */
-import { LIMITS, MONTH_DAYS } from '../config';
+import { LIMITS, MONTH_DAYS } from '../constants';
 import { applyDecision, computeSnapshot, payDueBills } from '../domain/finance';
 import { createExampleMonth, createFreshMonth, startNextMonth } from '../domain/months';
-import { parseAmount, parseCategory, parseDay, sanitizeText } from '../domain/sanitize';
-import type { Bill, Decision, IdFactory, MonthState } from '../domain/types';
+import { parseAmount, parseCategory, parseDay, sanitizeText } from '../utils/sanitize';
+import type { Bill, Decision, IdFactory, MonthState } from '../types';
 
 export type Action =
   | { type: 'LOG_SPEND'; payload: { amount: unknown; category?: unknown; note?: unknown; unexpected?: boolean } }
@@ -15,10 +15,16 @@ export type Action =
   | { type: 'APPLY_DECISION'; payload: unknown }
   | { type: 'TOGGLE_SUBSCRIPTION'; payload: { id: string } }
   | { type: 'ADD_BILL'; payload: { name: unknown; amount: unknown; due: unknown; type: unknown } }
+  | { type: 'LOG_INCOME'; payload: { amount: unknown; note?: unknown } }
   | { type: 'SAVE_TO_GOAL'; payload: { goalId: string; amount: unknown } }
+  | { type: 'ADD_GOAL'; payload: { name: unknown; target: unknown } }
+  | { type: 'DELETE_GOAL'; payload: { id: string } }
   | { type: 'DISMISS_WELCOME' }
   | { type: 'LOAD_EXAMPLE' }
   | { type: 'START_FRESH' };
+
+/** Upper bound on savings goals, to keep the UI usable. */
+export const MAX_GOALS = 8;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -65,6 +71,25 @@ export function reducer(state: MonthState, action: Action, newId: IdFactory): Mo
             category: parseCategory(payload.category, 'food'),
             note: sanitizeText(payload.note) || fallbackNote,
             kind: payload.unexpected ? 'surprise' : 'spend',
+          },
+        ],
+      };
+    }
+
+    case 'LOG_INCOME': {
+      const amount = parseAmount(action.payload.amount);
+      if (!amount || atCapacity) return state;
+      return {
+        ...state,
+        transactions: [
+          ...state.transactions,
+          {
+            id: newId(),
+            day: state.day,
+            amount,
+            category: 'other',
+            note: sanitizeText(action.payload.note) || 'Money in',
+            kind: 'income',
           },
         ],
       };
@@ -126,6 +151,24 @@ export function reducer(state: MonthState, action: Action, newId: IdFactory): Mo
           ...state.transactions,
           { id: newId(), day: state.day, amount, category: 'other', note: goal.name, kind: 'save', goalId: goal.id },
         ],
+      };
+    }
+
+    case 'ADD_GOAL': {
+      const name = sanitizeText(action.payload.name);
+      const target = parseAmount(action.payload.target);
+      if (!name || !target || state.goals.length >= MAX_GOALS) return state;
+      return { ...state, goals: [...state.goals, { id: newId(), name, target }] };
+    }
+
+    case 'DELETE_GOAL': {
+      const goal = state.goals.find((g) => g.id === action.payload.id);
+      if (!goal || goal.emergency) return state; // the emergency fund is permanent
+      // Money saved in the goal goes back into the spendable balance.
+      return {
+        ...state,
+        goals: state.goals.filter((g) => g.id !== goal.id),
+        transactions: state.transactions.filter((t) => !(t.kind === 'save' && t.goalId === goal.id)),
       };
     }
 

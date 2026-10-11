@@ -1,24 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
-import { SpendDialog } from './components/dialogs/SpendDialog';
+import { Suspense, lazy, useCallback, useState } from 'react';
 import type { SpendPreset } from './components/dialogs/SpendDialog';
 import { AppShell } from './components/layout/AppShell';
-import { isTabId } from './components/layout/tabs';
-import type { TabId } from './components/layout/tabs';
-import { useToast } from './components/ui/toastContext';
-import { MONTH_DAYS, SURPRISES } from './config';
+import { PageSkeleton } from './components/ui/PageSkeleton';
+import { MONTH_DAYS, SURPRISES } from './constants';
 import { computeSnapshot, payDueBills } from './domain/finance';
-import { formatINR } from './domain/money';
-import { AffordPage } from './pages/AffordPage';
-import { emptyDraft } from './pages/affordDraft';
-import type { AffordDraft } from './pages/affordDraft';
-import { MoneyPage } from './pages/MoneyPage';
+import type { QuickWin } from './domain/finance';
+import { emptyDraft } from './features/afford/affordDraft';
+import type { AffordDraft } from './features/afford/affordDraft';
+import { useFinance } from './hooks/useFinance';
+import { useHashTab } from './hooks/useHashTab';
+import { useTheme } from './hooks/useTheme';
+import { useToast } from './hooks/useToast';
 import { TodayPage } from './pages/TodayPage';
-import { useFinance } from './state/financeContext';
+import { formatINR } from './utils/money';
 
-function readTabFromHash(): TabId {
-  const hash = typeof window === 'undefined' ? '' : window.location.hash.slice(1);
-  return isTabId(hash) ? hash : 'home';
-}
+// Secondary screens and dialogs are code-split: they load on first use,
+// keeping the initial bundle small for a fast first paint.
+const AffordPage = lazy(() => import('./pages/AffordPage').then((m) => ({ default: m.AffordPage })));
+const MoneyPage = lazy(() => import('./pages/MoneyPage').then((m) => ({ default: m.MoneyPage })));
+const SpendDialog = lazy(() => import('./components/dialogs/SpendDialog').then((m) => ({ default: m.SpendDialog })));
 
 interface AppProps {
   /** Injectable for tests so the surprise expense is predictable. */
@@ -28,27 +28,10 @@ interface AppProps {
 export default function App({ random = Math.random }: AppProps) {
   const { state, dispatch, undo } = useFinance();
   const toast = useToast();
-  const [tab, setTab] = useState<TabId>(readTabFromHash);
-  const [navigated, setNavigated] = useState(false);
+  const { tab, navigated, goTo } = useHashTab();
+  const { theme, toggleTheme } = useTheme();
   const [draft, setDraft] = useState<AffordDraft>(emptyDraft);
   const [spendPreset, setSpendPreset] = useState<SpendPreset | null>(null);
-
-  const goTo = useCallback((next: TabId) => {
-    setTab(next);
-    setNavigated(true);
-    try {
-      window.history.replaceState(null, '', `#${next}`);
-    } catch {
-      // Some sandboxed frames block history; navigation still works without it.
-    }
-    window.scrollTo({ top: 0 });
-  }, []);
-
-  useEffect(() => {
-    const onHash = () => setTab(readTabFromHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
 
   const nextDay = () => {
     if (state.day >= MONTH_DAYS) {
@@ -67,35 +50,43 @@ export default function App({ random = Math.random }: AppProps) {
     );
   };
 
-  const openSurprise = () => {
+  const openSpend = useCallback(() => setSpendPreset({ flow: 'spend' }), []);
+  const openIncome = useCallback(() => setSpendPreset({ flow: 'income' }), []);
+  const openSurprise = useCallback(() => {
     const pick = SURPRISES[Math.floor(random() * SURPRISES.length)] ?? SURPRISES[0];
-    setSpendPreset({ amount: pick?.amount, note: pick?.note, category: 'other', unexpected: true });
-  };
-
-  // Only move focus after the user navigates, never on first load.
-  const focusOnMount = navigated;
+    setSpendPreset({ flow: 'spend', amount: pick?.amount, note: pick?.note, category: 'other', unexpected: true });
+  }, [random]);
+  const tryWin = useCallback(
+    (win: QuickWin) => {
+      setDraft({ ...emptyDraft(), decision: win.decision });
+      goTo('afford');
+    },
+    [goTo],
+  );
 
   return (
-    <AppShell tab={tab} onTab={goTo} day={state.day} onNextDay={nextDay}>
-      {tab === 'home' && (
-        <TodayPage
-          focusOnMount={focusOnMount}
-          onSpend={() => setSpendPreset({})}
-          onSurprise={openSurprise}
-          onAfford={() => goTo('afford')}
-          onSeeAll={() => goTo('money')}
-          onTryWin={(win) => {
-            setDraft({ ...emptyDraft(), decision: win.decision });
-            goTo('afford');
-          }}
-        />
-      )}
-      {tab === 'afford' && (
-        <AffordPage focusOnMount={focusOnMount} draft={draft} onDraftChange={setDraft} onDone={() => goTo('home')} />
-      )}
-      {tab === 'money' && <MoneyPage focusOnMount={focusOnMount} />}
+    <AppShell tab={tab} onTab={goTo} day={state.day} onNextDay={nextDay} theme={theme} onToggleTheme={toggleTheme}>
+      <Suspense fallback={<PageSkeleton />}>
+        {tab === 'home' && (
+          <TodayPage
+            focusOnMount={navigated}
+            onSpend={openSpend}
+            onIncome={openIncome}
+            onSurprise={openSurprise}
+            onAfford={() => goTo('afford')}
+            onSeeAll={() => goTo('money')}
+            onTryWin={tryWin}
+          />
+        )}
+        {tab === 'afford' && <AffordPage focusOnMount={navigated} draft={draft} onDraftChange={setDraft} onDone={() => goTo('home')} />}
+        {tab === 'money' && <MoneyPage focusOnMount={navigated} />}
+      </Suspense>
 
-      {spendPreset && <SpendDialog preset={spendPreset} onClose={() => setSpendPreset(null)} />}
+      {spendPreset && (
+        <Suspense fallback={null}>
+          <SpendDialog preset={spendPreset} onClose={() => setSpendPreset(null)} />
+        </Suspense>
+      )}
     </AppShell>
   );
 }

@@ -3,9 +3,9 @@
  * defensively, validated field by field and re-sanitised. Anything that does
  * not match the schema is rejected and the app falls back to defaults.
  */
-import { LIMITS, MONTH_DAYS, SCHEMA_VERSION, STORAGE_KEY, isCategoryKey } from '../config';
-import { sanitizeText } from '../domain/sanitize';
-import type { Bill, Goal, Habit, MonthState, Transaction, TransactionKind } from '../domain/types';
+import { LIMITS, MONTH_DAYS, SCHEMA_VERSION, STORAGE_KEY, isCategoryKey } from '../constants';
+import { sanitizeText } from '../utils/sanitize';
+import type { Bill, Goal, Habit, MonthState, Transaction, TransactionKind } from '../types';
 
 type Rec = Record<string, unknown>;
 

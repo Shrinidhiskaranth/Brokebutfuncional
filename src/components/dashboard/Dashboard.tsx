@@ -1,9 +1,11 @@
 /** Cards on the Today page. Each one reads from the shared finance snapshot. */
-import { CATEGORIES, CATEGORY_KEYS } from '../../config';
-import { buildCalendar, buildQuickWins, statusLine } from '../../domain/finance';
+import { memo } from 'react';
+import { CATEGORIES, CATEGORY_KEYS, MONTH_DAYS } from '../../constants';
+import { buildCalendar, buildForecast, buildQuickWins, statusLine } from '../../domain/finance';
 import type { DayStatus, QuickWin } from '../../domain/finance';
-import { formatINR } from '../../domain/money';
-import type { MonthState, Snapshot } from '../../domain/types';
+import { formatINR } from '../../utils/money';
+import type { MonthState, Snapshot } from '../../types';
+import { ForecastChart } from '../charts/ForecastChart';
 import { Icon } from '../ui/Icon';
 
 export function Welcome({ onDismiss }: { onDismiss: () => void }) {
@@ -31,11 +33,13 @@ export function Welcome({ onDismiss }: { onDismiss: () => void }) {
 interface HeroProps {
   snap: Snapshot;
   onSpend: () => void;
+  onIncome: () => void;
   onSurprise: () => void;
   onAfford: () => void;
 }
 
-export function Hero({ snap, onSpend, onSurprise, onAfford }: HeroProps) {
+/** The one number that matters most: what you can spend today and still last the month. */
+export const Hero = memo(function Hero({ snap, onSpend, onIncome, onSurprise, onAfford }: HeroProps) {
   const status = statusLine(snap);
   return (
     <section className="card tone-yellow hero s8" aria-labelledby="hero-label">
@@ -67,26 +71,30 @@ export function Hero({ snap, onSpend, onSurprise, onAfford }: HeroProps) {
         <button type="button" className="btn orange" onClick={onSpend}>
           <Icon name="plus" /> I spent money
         </button>
-        <button type="button" className="btn" onClick={onAfford}>
-          Can I afford it?
+        <button type="button" className="btn" onClick={onIncome}>
+          <Icon name="coin" /> Money in
         </button>
         <button type="button" className="btn" onClick={onSurprise}>
           <Icon name="bolt" /> Surprise expense
         </button>
+        <button type="button" className="btn" onClick={onAfford}>
+          Can I afford it?
+        </button>
       </div>
     </section>
   );
-}
+});
 
 const RING_C = 2 * Math.PI * 60;
 
-export function HealthCard({ snap }: { snap: Snapshot }) {
+/** Financial health score (0–100) with an explanation of its five factors. */
+export const HealthCard = memo(function HealthCard({ snap }: { snap: Snapshot }) {
   return (
     <section className="card tone-pink health s4" aria-labelledby="health-h">
       <h2 className="label center" id="health-h">
-        Money health
+        Financial health
       </h2>
-      <div className="ring" role="img" aria-label={`Money health ${snap.score} out of 100: ${snap.mood.label}`}>
+      <div className="ring" role="img" aria-label={`Financial health ${snap.score} out of 100: ${snap.mood.label}`}>
         <svg viewBox="0 0 150 150" aria-hidden="true" focusable="false">
           <circle cx="75" cy="75" r="60" className="ring-base" />
           <circle
@@ -122,9 +130,53 @@ export function HealthCard({ snap }: { snap: Snapshot }) {
       </details>
     </section>
   );
-}
+});
 
-export function MoneySplit({ snap }: { snap: Snapshot }) {
+/** The four numbers the brief cares about, side by side. */
+export const MonthMetrics = memo(function MonthMetrics({ snap }: { snap: Snapshot }) {
+  const metrics = [
+    { label: 'Remaining balance', value: formatINR(snap.free), note: 'after bills are set aside', bad: snap.free < 0 },
+    { label: 'Daily allowance', value: formatINR(snap.perDay), note: `for the next ${snap.daysLeft} days`, bad: false },
+    { label: 'Monthly forecast', value: formatINR(snap.monthEnd), note: `left on Day ${MONTH_DAYS} at your pace`, bad: snap.monthEnd < 0 },
+  ];
+  return (
+    <section className="metrics s12" aria-label="Month at a glance">
+      {metrics.map((m) => (
+        <div className="metric card" key={m.label}>
+          <p className="label">{m.label}</p>
+          <p className={`metric-v num${m.bad ? ' down' : ''}`}>{m.value}</p>
+          <p className="small muted">{m.note}</p>
+        </div>
+      ))}
+      <div className={`metric card risk risk-${snap.risk.tone}`}>
+        <p className="label">Financial risk</p>
+        <p className="metric-v">
+          <span className={`risk-badge risk-badge-${snap.risk.tone}`}>{snap.risk.level}</span>
+        </p>
+        <p className="small muted">{snap.risk.reason}</p>
+      </div>
+    </section>
+  );
+});
+
+/** Monthly forecast: balance history plus the projection to Day 30. */
+export const ForecastCard = memo(function ForecastCard({ state, snap }: { state: MonthState; snap: Snapshot }) {
+  return (
+    <section className="card s12" aria-labelledby="forecast-h">
+      <div className="card-h">
+        <h2 id="forecast-h" className="card-title">
+          Monthly forecast
+        </h2>
+        <p className={`small strong${snap.monthEnd < 0 ? ' down' : ''}`}>
+          Day {MONTH_DAYS}: {formatINR(snap.monthEnd)}
+        </p>
+      </div>
+      <ForecastChart series={buildForecast(state, snap)} today={state.day} label="Monthly forecast" />
+    </section>
+  );
+});
+
+export const MoneySplit = memo(function MoneySplit({ snap }: { snap: Snapshot }) {
   const parts = [
     { label: 'Spent', value: snap.spent, tone: 'pink', note: 'incl. bills paid' },
     { label: 'Saved', value: snap.saved, tone: 'mint', note: 'in your goals' },
@@ -161,7 +213,7 @@ export function MoneySplit({ snap }: { snap: Snapshot }) {
       </dl>
     </section>
   );
-}
+});
 
 interface QuickWinsProps {
   state: MonthState;
@@ -169,7 +221,7 @@ interface QuickWinsProps {
   onTry: (win: QuickWin) => void;
 }
 
-export function QuickWins({ state, snap, onTry }: QuickWinsProps) {
+export const QuickWins = memo(function QuickWins({ state, snap, onTry }: QuickWinsProps) {
   const wins = buildQuickWins(state, snap);
   return (
     <section className="card tone-mint s4" aria-labelledby="wins-h">
@@ -195,7 +247,7 @@ export function QuickWins({ state, snap, onTry }: QuickWinsProps) {
       )}
     </section>
   );
-}
+});
 
 const DAY_STATUS_TEXT: Record<DayStatus, string> = {
   under: 'under limit',
@@ -204,7 +256,7 @@ const DAY_STATUS_TEXT: Record<DayStatus, string> = {
   future: 'coming up',
 };
 
-export function MonthCalendar({ state, snap }: { state: MonthState; snap: Snapshot }) {
+export const MonthCalendar = memo(function MonthCalendar({ state, snap }: { state: MonthState; snap: Snapshot }) {
   const days = buildCalendar(state, snap);
   return (
     <section className="card s7" aria-labelledby="cal-h">
@@ -246,9 +298,9 @@ export function MonthCalendar({ state, snap }: { state: MonthState; snap: Snapsh
       </ul>
     </section>
   );
-}
+});
 
-export function CategoryBreakdown({ snap }: { snap: Snapshot }) {
+export const CategoryBreakdown = memo(function CategoryBreakdown({ snap }: { snap: Snapshot }) {
   const cats = CATEGORY_KEYS.map((key) => ({ key, value: snap.byCategory[key] ?? 0 }))
     .filter((c) => c.value > 0)
     .sort((a, b) => b.value - a.value);
@@ -281,4 +333,4 @@ export function CategoryBreakdown({ snap }: { snap: Snapshot }) {
       )}
     </section>
   );
-}
+});
